@@ -390,7 +390,15 @@ async function fetchEsriExport(service, bbox, w, h, transparent) {
   const url = 'https://server.arcgisonline.com/ArcGIS/rest/services/' + service + '/MapServer/export?bbox=' + bbox.join(',') + '&bboxSR=3857&imageSR=3857&size=' + w + ',' + h + '&format=' + (transparent ? 'png32' : 'jpg') + '&transparent=' + (transparent ? 'true' : 'false') + '&f=image';
   const res = await fetch(url);
   if (!res.ok) throw new Error('Map image request failed (' + res.status + ')');
-  return urlToImage(await blobToDataURL(await res.blob()));
+  const blob = await res.blob();
+  if (!blob.type.startsWith('image/')) {
+    let m = '';
+    try {
+      m = JSON.parse(await blob.text()).error.message;
+    } catch (e) {}
+    throw new Error('map service error' + (m ? ': ' + m : ''));
+  }
+  return urlToImage(await blobToDataURL(blob));
 }
 function imageToDataURLMax(img, maxW, q) {
   const nw = img.naturalWidth || img.width,
@@ -403,7 +411,9 @@ function imageToDataURLMax(img, maxW, q) {
   return c.toDataURL('image/jpeg', q);
 }
 async function captureLocalityView(map) {
+  map.invalidateSize();
   const size = map.getSize();
+  if (!size.x || !size.y) throw new Error('the map is not visible yet - wait a moment and try again');
   const sf = Math.max(1, Math.min(2, 1300 / size.x));
   const w = Math.round(size.x * sf),
     h = Math.round(size.y * sf);
@@ -1654,7 +1664,7 @@ function LocalityModal({
         source: 'capture'
       }));
     } catch (e) {
-      notify('Could not capture the map: ' + e.message + ' (an internet connection is needed).', 'error');
+      notify('Could not capture the map: ' + e.message + '. An internet connection is needed.', 'error');
       setBusy(false);
     }
   };
@@ -1728,6 +1738,7 @@ function LocalityModal({
     ref: divRef,
     style: {
       height: 'min(56vh,460px)',
+      minHeight: 260,
       borderRadius: 8,
       overflow: 'hidden',
       border: '1px solid var(--line)',
