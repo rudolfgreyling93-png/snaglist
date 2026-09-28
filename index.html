@@ -117,6 +117,45 @@ const PRIORITIES = {
 const PRIORITY_ORDER = ['low', 'medium', 'high', 'critical'];
 const statusOf = s => STATUSES[s && s.status] || STATUSES.open;
 const isOverdue = s => !!(s && s.dueDate && s.status !== 'done' && s.dueDate < new Date().toISOString().slice(0, 10));
+const fmtStamp = ts => {
+  if (!ts) return '';
+  try {
+    return new Date(ts).toLocaleString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch (e) {
+    return '';
+  }
+};
+const pad2 = n => String(n).padStart(2, '0');
+const toLocalInput = ts => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+};
+const fromLocalInput = s => {
+  if (!s) return null;
+  const t = new Date(s).getTime();
+  return isNaN(t) ? null : t;
+};
+const identOf = s => s && (s.identifiedAt || s.createdAt) || null;
+const fmtDuration = ms => {
+  if (ms == null || ms < 0) return '';
+  const h = ms / 3600000;
+  if (h < 1) return '< 1 hour';
+  if (h < 24) return Math.round(h) + (Math.round(h) === 1 ? ' hour' : ' hours');
+  const d = Math.floor(h / 24);
+  return d + (d === 1 ? ' day' : ' days');
+};
+const openFor = s => {
+  const a = identOf(s);
+  if (!a) return '';
+  return fmtDuration((s.status === 'done' && s.completedAt ? s.completedAt : Date.now()) - a);
+};
 const fmtDate = d => {
   if (!d) return '';
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
@@ -273,8 +312,8 @@ function imageToDataURL(img) {
   return c.toDataURL('image/jpeg', JPEG_Q);
 }
 function toCSV(report) {
-  const rows = [['#', 'Location / chainage', 'Latitude', 'Longitude', 'Priority', 'Description', 'Action required', 'Responsible', 'Due date', 'Status', 'Completed on', 'Completion note', 'Before photo', 'After photo', 'Logged']];
-  report.snags.forEach((o, i) => rows.push([i + 1, o.location || '', o.lat || '', o.lng || '', (PRIORITIES[o.priority] || {}).label || '', o.description || '', o.action || '', o.trade || '', fmtDate(o.dueDate), statusOf(o).label, o.completedAt ? fmtDT(o.completedAt) : '', o.completionNote || '', o.before ? 'Yes' : 'No', o.after ? 'Yes' : 'No', fmtDT(o.createdAt)]));
+  const rows = [['#', 'Location / chainage', 'Latitude', 'Longitude', 'Priority', 'Description', 'Action required', 'Responsible', 'Due date', 'Status', 'Identified on', 'Completed on', 'Time open / to close', 'Completion note', 'Before photo', 'After photo', 'Record created']];
+  report.snags.forEach((o, i) => rows.push([i + 1, o.location || '', o.lat || '', o.lng || '', (PRIORITIES[o.priority] || {}).label || '', o.description || '', o.action || '', o.trade || '', fmtDate(o.dueDate), statusOf(o).label, fmtStamp(identOf(o)), o.completedAt && o.status === 'done' ? fmtStamp(o.completedAt) : '', openFor(o), o.completionNote || '', o.before ? 'Yes' : 'No', o.after ? 'Yes' : 'No', fmtDT(o.createdAt)]));
   const esc = v => {
     const s = String(v == null ? '' : v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -543,11 +582,15 @@ async function buildPDF(report, notify) {
     const descLines = doc.splitTextToSize(o.description || '—', contentW - 6);
     const actionLines = o.action ? doc.splitTextToSize('Action required: ' + o.action, contentW - 6) : [];
     const noteLines = o.status === 'done' && o.completionNote ? doc.splitTextToSize('Completion note: ' + o.completionNote, contentW - 6) : [];
-    const metaBits = [];
+    const metaBits = [],
+      metaBits2 = [];
     if (o.trade) metaBits.push('Responsible: ' + o.trade);
     if (o.dueDate) metaBits.push('Due: ' + fmtDate(o.dueDate));
-    if (o.status === 'done' && o.completedAt) metaBits.push('Completed: ' + fmtDT(o.completedAt));
-    const metaLine = metaBits.join('   |   ');
+    metaBits2.push('Identified: ' + fmtStamp(identOf(o)));
+    if (o.status === 'done' && o.completedAt) metaBits2.push('Completed: ' + fmtStamp(o.completedAt));
+    metaBits2.push((o.status === 'done' ? 'Time to close: ' : 'Open for: ') + openFor(o));
+    const metaLine = metaBits.join('   |   '),
+      metaLine2 = metaBits2.join('   |   ');
     const coordLine = o.lat ? 1 : 0;
     const gap = 4;
     const pw = (contentW - 6 - gap) / 2;
@@ -575,7 +618,7 @@ async function buildPDF(report, notify) {
     const fb = fit(o.before),
       fa = fit(o.after);
     const photoH = Math.max(fb.h, fa.h);
-    const textLines = coordLine + (metaLine ? 1 : 0) + descLines.length + actionLines.length + noteLines.length + 1;
+    const textLines = coordLine + (metaLine ? 1 : 0) + 1 + descLines.length + actionLines.length + noteLines.length + 1;
     const headH = 7;
     const blockH = headH + 4 + textLines * 4.6 + 5 + photoH + 4;
     ensure(blockH + 4);
@@ -610,10 +653,7 @@ async function buildPDF(report, notify) {
       doc.text(`${(+o.lat).toFixed(5)}, ${(+o.lng).toFixed(5)}`, margin + 17, by);
       by += 4.6;
     }
-    if (metaLine) {
-      doc.text(metaLine, margin + 3, by);
-      by += 4.6;
-    }
+if (metaLine) {      doc.text(metaLine, margin + 3, by);      by += 4.6;    }    doc.setFont('helvetica', 'bold');    doc.text(metaLine2, margin + 3, by);    doc.setFont('helvetica', 'normal');    by += 4.6;
     doc.setFont('helvetica', 'bold');
     doc.text('Description:', margin + 3, by);
     by += 4.6;
@@ -1279,6 +1319,10 @@ function CompleteModal({
   const [after, setAfter] = useState(snag.after || null);
   const [marked, setMarked] = useState(!!snag.afterMarked);
   const [note, setNote] = useState(snag.completionNote || '');
+  const [when, setWhen] = useState(Date.now());
+  const [whenEdited, setWhenEdited] = useState(false);
+  const identified = identOf(snag);
+  const dateErr = when > Date.now() + 60000 ? 'The completed date/time cannot be in the future.' : identified && when < identified ? 'The completed date/time cannot be before the snag was identified (' + fmtStamp(identified) + ').' : '';
   return h("div", {
     className: "no-print",
     style: {
@@ -1329,6 +1373,50 @@ function CompleteModal({
       display: 'block',
       marginTop: 12
     }, lblStyle)
+  }, "Date & time completed"), h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginTop: 4
+    }
+  }, h("input", {
+    type: "datetime-local",
+    className: "field",
+    value: toLocalInput(when),
+    max: toLocalInput(Date.now()),
+    onChange: e => {
+      const t = fromLocalInput(e.target.value);
+      if (t) {
+        setWhen(t);
+        setWhenEdited(true);
+      }
+    },
+    style: {
+      minWidth: 0
+    }
+  }), h("button", {
+    className: "btn btn-sm",
+    onClick: () => {
+      setWhen(Date.now());
+      setWhenEdited(false);
+    }
+  }, "Now")), h("div", {
+    style: {
+      fontSize: 11,
+      opacity: .6,
+      marginTop: 4
+    }
+  }, "Identified: ", fmtStamp(identified)), dateErr && h("div", {
+    style: {
+      fontSize: 12,
+      color: '#ffb4b4',
+      marginTop: 4
+    }
+  }, dateErr), h("label", {
+    style: Object.assign({
+      display: 'block',
+      marginTop: 12
+    }, lblStyle)
   }, "Completion note (optional)"), h("textarea", {
     className: "field",
     rows: "2",
@@ -1350,8 +1438,8 @@ function CompleteModal({
     onClick: onCancel
   }, "Cancel"), h("button", {
     className: "btn btn-vis",
-    disabled: !after,
-    onClick: () => onSave(after, marked, note.trim())
+    disabled: !after || !!dateErr,
+    onClick: () => onSave(after, marked, note.trim(), whenEdited ? when : Date.now())
   }, "Mark as completed"))));
 }
 function SnagCard({
@@ -1487,13 +1575,19 @@ function SnagCard({
       fontSize: 12,
       opacity: .85
     }
-  }, snag.trade ? 'Responsible: ' + snag.trade : '', snag.trade && snag.dueDate ? '  ·  ' : '', snag.dueDate ? 'Due: ' + fmtDate(snag.dueDate) : ''), snag.status === 'done' && h("div", {
+  }, snag.trade ? 'Responsible: ' + snag.trade : '', snag.trade && snag.dueDate ? '  ·  ' : '', snag.dueDate ? 'Due: ' + fmtDate(snag.dueDate) : ''), h("div", {
     style: {
       marginTop: 4,
       fontSize: 12,
+      opacity: .9
+    }
+  }, h("b", null, "Identified: "), fmtStamp(identOf(snag)), snag.status === 'done' ? '' : '  ·  Open for ' + openFor(snag)), snag.status === 'done' && h("div", {
+    style: {
+      marginTop: 2,
+      fontSize: 12,
       color: STATUSES.done.color
     }
-  }, "Completed ", snag.completedAt ? fmtDT(snag.completedAt) : '', snag.completionNote ? ' — ' + snag.completionNote : '')), h("div", {
+  }, h("b", null, "Completed: "), snag.completedAt ? fmtStamp(snag.completedAt) : '', "  ·  Closed in ", openFor(snag), snag.completionNote ? ' — ' + snag.completionNote : '')), h("div", {
     style: {
       display: 'flex',
       gap: 8,
@@ -1522,14 +1616,20 @@ function SnagForm({
     beforeMarked: false,
     afterMarked: false,
     completionNote: '',
-    completedAt: null
+    completedAt: null,
+    identifiedAt: null
   };
-  const [d, setD] = useState(empty);
+  const fresh = () => Object.assign({}, empty, {
+    identifiedAt: Date.now()
+  });
+  const [d, setD] = useState(fresh);
   const [busyGPS, setBusyGPS] = useState(false);
   const [listening, setListening] = useState(false);
   const recRef = useRef(null);
   useEffect(() => {
-    setD(editing ? Object.assign({}, empty, editing) : empty);
+    setD(editing ? Object.assign({}, empty, editing, {
+      identifiedAt: editing.identifiedAt || editing.createdAt || Date.now()
+    }) : fresh());
   }, [editing]);
   const set = (k, v) => setD(x => Object.assign({}, x, {
     [k]: v
@@ -1611,13 +1711,19 @@ function SnagForm({
     if (!d.description.trim()) return notify('Describe the snag before saving.', 'error');
     if (!d.before) return notify('A "before" photo is required for every snag.', 'error');
     if (d.status === 'done' && !d.after) return notify('Add an "after" photo before marking this snag as completed.', 'error');
-    const completedAt = d.status === 'done' ? d.completedAt || Date.now() : null;
+    const now = Date.now();
+    const identifiedAt = d.identifiedAt || now;
+    if (identifiedAt > now + 60000) return notify('The identified date/time cannot be in the future.', 'error');
+    const completedAt = d.status === 'done' ? d.completedAt || now : null;
+    if (completedAt && completedAt > now + 60000) return notify('The completed date/time cannot be in the future.', 'error');
+    if (completedAt && completedAt < identifiedAt) return notify('The completed date/time cannot be before the identified date/time.', 'error');
     onSubmit(Object.assign({}, d, {
       id: editing ? editing.id : uid(),
-      createdAt: editing ? editing.createdAt : Date.now(),
+      createdAt: editing ? editing.createdAt : now,
+      identifiedAt,
       completedAt
     }));
-    setD(empty);
+    setD(fresh());
   };
   const field = (label, child) => h("div", null, h("label", {
     style: lblStyle
@@ -1745,6 +1851,51 @@ function SnagForm({
     }
   }))), h("div", {
     style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))',
+      gap: 10,
+      marginTop: 10
+    }
+  }, field('Date & time identified', h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginTop: 4
+    }
+  }, h("input", {
+    type: "datetime-local",
+    className: "field",
+    value: toLocalInput(d.identifiedAt),
+    max: toLocalInput(Date.now()),
+    onChange: e => set('identifiedAt', fromLocalInput(e.target.value)),
+    style: {
+      minWidth: 0
+    }
+  }), h("button", {
+    className: "btn btn-sm",
+    onClick: () => set('identifiedAt', Date.now()),
+    title: "Set to the current date and time"
+  }, "Now"))), d.status === 'done' && field('Date & time completed', h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginTop: 4
+    }
+  }, h("input", {
+    type: "datetime-local",
+    className: "field",
+    value: toLocalInput(d.completedAt || Date.now()),
+    max: toLocalInput(Date.now()),
+    onChange: e => set('completedAt', fromLocalInput(e.target.value)),
+    style: {
+      minWidth: 0
+    }
+  }), h("button", {
+    className: "btn btn-sm",
+    onClick: () => set('completedAt', Date.now()),
+    title: "Set to the current date and time"
+  }, "Now")))), h("div", {
+    style: {
       display: 'flex',
       gap: 14,
       flexWrap: 'wrap',
@@ -1782,7 +1933,13 @@ function SnagForm({
   }, field('Status', h("select", {
     className: "field",
     value: d.status,
-    onChange: e => set('status', e.target.value),
+    onChange: e => {
+      const v = e.target.value;
+      setD(x => Object.assign({}, x, {
+        status: v,
+        completedAt: v === 'done' ? x.completedAt || Date.now() : x.completedAt
+      }));
+    },
     style: {
       marginTop: 4
     }
@@ -1935,7 +2092,7 @@ function PrintReport({
         whiteSpace: 'pre-wrap',
         margin: '2px 0'
       }
-    }, React.createElement("b", null, "Description:"), " ", o.description || '—'), o.action && React.createElement("div", null, React.createElement("b", null, "Action required:"), " ", o.action), o.status === 'done' && React.createElement("div", null, React.createElement("b", null, "Completed:"), " ", o.completedAt ? fmtDT(o.completedAt) : '', o.completionNote ? ' — ' + o.completionNote : ''), React.createElement("div", {
+    }, React.createElement("b", null, "Description:"), " ", o.description || '—'), o.action && React.createElement("div", null, React.createElement("b", null, "Action required:"), " ", o.action), React.createElement("div", null, React.createElement("b", null, "Identified:"), " ", fmtStamp(identOf(o)), o.status === 'done' ? '' : '  |  Open for ' + openFor(o)), o.status === 'done' && React.createElement("div", null, React.createElement("b", null, "Completed:"), " ", o.completedAt ? fmtStamp(o.completedAt) : '', "  |  Closed in ", openFor(o), o.completionNote ? ' — ' + o.completionNote : ''), React.createElement("div", {
       style: {
         display: 'flex',
         gap: 8,
@@ -2055,7 +2212,7 @@ function App() {
     }));
     if (editing && editing.id === id) setEditing(null);
   };
-  const completeSnag = (id, after, marked, note) => {
+  const completeSnag = (id, after, marked, note, at) => {
     patchActive(r => ({
       ...r,
       snags: r.snags.map(x => x.id === id ? {
@@ -2064,7 +2221,7 @@ function App() {
         after,
         afterMarked: marked,
         completionNote: note,
-        completedAt: Date.now()
+        completedAt: at || Date.now()
       } : x)
     }));
     setCompleting(null);
@@ -2587,7 +2744,7 @@ function App() {
       snag: sn,
       notify: notify,
       onCancel: () => setCompleting(null),
-      onSave: (after, marked, note) => completeSnag(sn.id, after, marked, note)
+      onSave: (after, marked, note, at) => completeSnag(sn.id, after, marked, note, at)
     }) : null;
   })(), toastNode);
 }
