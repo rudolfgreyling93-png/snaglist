@@ -1,0 +1,2607 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Snag List</title>
+<link rel="icon" href="assets/logo.png">
+<link rel="apple-touch-icon" href="assets/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<script src="vendor/react.production.min.js"></script>
+<script src="vendor/react-dom.production.min.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/leaflet.js"></script>
+<style>
+  :root { --steel:#1a1f26; --panel:#232a33; --line:#39424e; --vis:#f5a623; --vis2:#ffcc33; }
+  html,body{ background:#12161b; }
+  body{ font-family:'Inter',system-ui,sans-serif; color:#e6eaef; margin:0; -webkit-text-size-adjust:100%; }
+  .font-head{ font-family:'Oswald',sans-serif; letter-spacing:.02em; }
+  input,select,textarea,button{ font-family:inherit; }
+  textarea{ resize:vertical; }
+  .field{ background:#12161b; border:1px solid var(--line); border-radius:8px; padding:.55rem .7rem; width:100%; color:#e6eaef; outline:none; }
+  .field:focus{ border-color:var(--vis); box-shadow:0 0 0 2px rgba(245,166,35,.25); }
+  .btn{ display:inline-flex; align-items:center; gap:.4rem; border-radius:8px; padding:.5rem .8rem; font-weight:600; border:1px solid var(--line); background:var(--panel); color:#e6eaef; cursor:pointer; }
+  .btn:hover{ border-color:#5a6675; }
+  .btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .btn-vis{ background:var(--vis); color:#1a1200; border-color:var(--vis); }
+  .btn-vis:hover{ background:var(--vis2); border-color:var(--vis2); }
+  .btn-danger{ background:#3a1c1c; border-color:#5c2b2b; color:#ffb4b4; }
+  .btn-sm{ padding:.3rem .5rem; font-size:12px; }
+  .anno-canvas{ touch-action:none; max-width:100%; background:#000; border-radius:6px; display:block; }
+  .listening{ animation:pulse 1s infinite; }
+  @keyframes pulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(239,68,68,.6);} 50%{ box-shadow:0 0 0 6px rgba(239,68,68,0);} }
+  .print-only{ display:none; }
+  .thumb-wrap{ position:relative; }
+  .thumb-btn{ position:absolute; top:-8px; width:22px; height:22px; border-radius:999px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:12px; line-height:1; }
+  .thumb-anno{ left:-8px; background:#173a26; border:1px solid #2b5c3f; color:#8ef0b0; }
+  .thumb-del{ right:-8px; background:#3a1c1c; border:1px solid #5c2b2b; color:#ffb4b4; }
+  .anno-badge{ position:absolute; bottom:2px; right:2px; background:rgba(245,166,35,.9); color:#1a1200; font-size:9px; font-weight:700; padding:1px 4px; border-radius:4px; }
+
+  @media print{
+    @page{ size:A4; margin:14mm; }
+    html,body{ background:#fff !important; color:#000 !important; }
+    .no-print{ display:none !important; }
+    .print-only{ display:block !important; }
+    .pr-wrap{ color:#000; font-family:'Inter',sans-serif; }
+    .pr-wrap h1,.pr-wrap h2,.pr-wrap h3,.pr-wrap .font-head{ font-family:'Oswald',sans-serif; color:#000; }
+    .pr-table{ width:100%; border-collapse:collapse; }
+    .pr-table td,.pr-table th{ border:1px solid #000; padding:5px 7px; font-size:11px; vertical-align:top; text-align:left; }
+    .pr-snag{ border:1px solid #000; margin:0 0 10px; page-break-inside:avoid; }
+    .pr-snag-head{ border-bottom:1px solid #000; padding:5px 8px; font-weight:700; }
+    .pr-snag-body{ padding:6px 8px; font-size:12px; }
+    .pr-photos{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+    .pr-photos img{ width:31%; border:1px solid #000; }
+    .pr-sig{ display:flex; gap:24px; margin-top:26px; page-break-inside:avoid; }
+    .pr-sig div{ flex:1; }
+    .pr-sig .line{ border-top:1px solid #000; margin-top:38px; padding-top:4px; font-size:11px; }
+    .pr-map svg{ width:100%; height:auto; border:1px solid #000; }
+    .sev-chip{ border:1px solid #000 !important; color:#000 !important; background:#fff !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>window.__EMBEDDED=(function(){try{return window.self!==window.top;}catch(e){return true;}})();window.addEventListener("securitypolicyviolation",function(ev){var el=document.getElementById("root");if(el&&!el.hasChildNodes()){el.innerHTML="<div style=\"padding:24px;color:#ffb4b4;font-family:sans-serif\">Blocked by page security policy: "+ev.violatedDirective+" ("+(ev.blockedURI||"inline")+").</div>";}});</script>
+
+<script>
+const {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback
+} = React;
+const STATUSES = {
+  open: {
+    label: 'Open',
+    color: '#ef4444',
+    bg: '#350f0f'
+  },
+  progress: {
+    label: 'In progress',
+    color: '#fbbf24',
+    bg: '#332708'
+  },
+  done: {
+    label: 'Completed',
+    color: '#22c55e',
+    bg: '#0f2a1a'
+  }
+};
+const STATUS_ORDER = ['open', 'progress', 'done'];
+const PRIORITIES = {
+  low: {
+    label: 'Low',
+    color: '#38bdf8',
+    bg: '#0d2a3a'
+  },
+  medium: {
+    label: 'Medium',
+    color: '#fbbf24',
+    bg: '#332708'
+  },
+  high: {
+    label: 'High',
+    color: '#fb923c',
+    bg: '#331c07'
+  },
+  critical: {
+    label: 'Critical',
+    color: '#ef4444',
+    bg: '#350f0f'
+  }
+};
+const PRIORITY_ORDER = ['low', 'medium', 'high', 'critical'];
+const statusOf = s => STATUSES[s && s.status] || STATUSES.open;
+const isOverdue = s => !!(s && s.dueDate && s.status !== 'done' && s.dueDate < new Date().toISOString().slice(0, 10));
+const fmtDate = d => {
+  if (!d) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+  if (m) return m[3] + '/' + m[2] + '/' + m[1];
+  try {
+    return new Date(d).toLocaleDateString('en-GB');
+  } catch (e) {
+    return String(d);
+  }
+};
+const MAX_W = 1024;
+const JPEG_Q = 0.7;
+const MAX_DOCS = 10;
+const MAX_DOC_MB = 20;
+const COMPANY = {
+  name: 'INFRASTRUCTURE CONSULTING ENGINEERS cc',
+  addressLines: ['Crestway Office Park, Block D, 1st Floor', '20 Hotel Street', 'PO Box 186, Persequor Park, 0020'],
+  tel: '012 349 2022',
+  regNo: '1992/019030/23',
+  members: 'IM Moeti; SJ vd Hoven; TE Moeti; PG Joubert',
+  logo: 'assets/logo.png'
+};
+const ESRI_IMAGERY_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const ESRI_LABELS_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+const ESRI_ATTRIBUTION = 'Tiles © Esri — Esri, Maxar, Earthstar Geographics, and the GIS User Community';
+const DB_NAME = 'snaglist-db',
+  STORE = 'reports',
+  DB_VER = 1;
+function openDB() {
+  return new Promise((res, rej) => {
+    let r;
+    try {
+      r = indexedDB.open(DB_NAME, DB_VER);
+    } catch (e) {
+      return rej(e);
+    }
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, {
+        keyPath: 'id'
+      });
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbGetAll() {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const q = tx.objectStore(STORE).getAll();
+    q.onsuccess = () => res(q.result || []);
+    q.onerror = () => rej(q.error);
+  });
+}
+async function idbPut(rep) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(rep);
+    tx.oncomplete = () => res(true);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbDel(id) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => res(true);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const fmtDT = ts => {
+  try {
+    return new Date(ts).toLocaleString('en-GB');
+  } catch (e) {
+    return '';
+  }
+};
+function blankReport() {
+  return {
+    id: uid(),
+    meta: {
+      projectName: '',
+      date: todayISO(),
+      inspector: '',
+      contractor: '',
+      client: ''
+    },
+    snags: [],
+    documents: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+}
+function fileToImage(file) {
+  return new Promise((res, rej) => {
+    if (!file || !file.type || !file.type.startsWith('image/')) return rej(new Error('Not an image file.'));
+    const reader = new FileReader();
+    reader.onerror = () => rej(new Error('Could not read the file.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = () => rej(new Error('Image data is corrupt or unsupported.'));
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function urlToImage(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('Could not load photo for annotation.'));
+    img.src = src;
+  });
+}
+function fileToDataURL(file) {
+  return new Promise((res, rej) => {
+    if (!file) return rej(new Error('No file given.'));
+    const reader = new FileReader();
+    reader.onerror = () => rej(new Error('Could not read the file.'));
+    reader.onload = () => res(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+function fmtBytes(n) {
+  if (n == null) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+function scaledDims(w, h) {
+  if (w <= MAX_W) return {
+    w,
+    h
+  };
+  const r = MAX_W / w;
+  return {
+    w: Math.round(w * r),
+    h: Math.round(h * r)
+  };
+}
+function imageToDataURL(img) {
+  const dims = scaledDims(img.naturalWidth || img.width, img.naturalHeight || img.height);
+  const c = document.createElement('canvas');
+  c.width = dims.w;
+  c.height = dims.h;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0, dims.w, dims.h);
+  return c.toDataURL('image/jpeg', JPEG_Q);
+}
+function toCSV(report) {
+  const rows = [['#', 'Location / chainage', 'Latitude', 'Longitude', 'Priority', 'Description', 'Action required', 'Responsible', 'Due date', 'Status', 'Completed on', 'Completion note', 'Before photo', 'After photo', 'Logged']];
+  report.snags.forEach((o, i) => rows.push([i + 1, o.location || '', o.lat || '', o.lng || '', (PRIORITIES[o.priority] || {}).label || '', o.description || '', o.action || '', o.trade || '', fmtDate(o.dueDate), statusOf(o).label, o.completedAt ? fmtDT(o.completedAt) : '', o.completionNote || '', o.before ? 'Yes' : 'No', o.after ? 'Yes' : 'No', fmtDT(o.createdAt)]));
+  const esc = v => {
+    const s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  return '﻿' + rows.map(r => r.map(esc).join(',')).join('\r\n');
+}
+async function saveFile(filename, blob, notify) {
+  try {
+    if (window.claude && typeof window.claude.use === 'function') {
+      const dl = await window.claude.use('downloads');
+      if (dl) {
+        const r = await dl.save({
+          filename,
+          data: blob
+        });
+        if (!r || r.status === 'saved') notify && notify('Saved ' + filename + '.', 'ok');
+        return;
+      }
+    }
+  } catch (e) {
+    if (e && e.code === 'declined') return;
+    notify && notify('Download failed: ' + (e && e.message || e), 'error');
+    return;
+  }
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      a.remove();
+    }, 500);
+  } catch (e) {
+    notify && notify('Download not supported in this environment.', 'error');
+  }
+}
+function mapTransform(observations) {
+  const pts = observations.map((o, i) => ({
+    o,
+    n: i + 1
+  })).filter(p => p.o.lat != null && p.o.lng != null && p.o.lat !== '' && p.o.lng !== '');
+  if (!pts.length) return null;
+  const lats = pts.map(p => +p.o.lat),
+    lngs = pts.map(p => +p.o.lng);
+  let minLa = Math.min(...lats),
+    maxLa = Math.max(...lats),
+    minLo = Math.min(...lngs),
+    maxLo = Math.max(...lngs);
+  const spanLa = maxLa - minLa || 0.0005,
+    spanLo = maxLo - minLo || 0.0005;
+  minLa -= spanLa * 0.15;
+  maxLa += spanLa * 0.15;
+  minLo -= spanLo * 0.15;
+  maxLo += spanLo * 0.15;
+  return {
+    pts,
+    minLa,
+    maxLa,
+    minLo,
+    maxLo
+  };
+}
+async function fetchStaticMapImage(observations, w, h) {
+  const tf = mapTransform(observations);
+  if (!tf) return null;
+  const bbox = [tf.minLo, tf.minLa, tf.maxLo, tf.maxLa].join(',');
+  const url = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export' + '?bbox=' + encodeURIComponent(bbox) + '&bboxSR=4326&imageSR=4326&size=' + w + ',' + h + '&format=png&transparent=false&f=image';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Map image request failed (' + res.status + ')');
+  const blob = await res.blob();
+  const dataURL = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Could not read map image.'));
+    reader.readAsDataURL(blob);
+  });
+  return {
+    dataURL,
+    tf
+  };
+}
+async function buildPDF(report, notify) {
+  const {
+    jsPDF
+  } = window.jspdf || {};
+  if (!jsPDF) {
+    notify('PDF library failed to load (check network access to the CDN).', 'error');
+    return null;
+  }
+  let logoImg = null;
+  try {
+    logoImg = await urlToImage(COMPANY.logo);
+  } catch (e) {}
+  let mapImg = null;
+  try {
+    mapImg = await fetchStaticMapImage(report.snags, 1100, 330);
+  } catch (e) {}
+  const allPhotos = [];
+  report.snags.forEach(o => {
+    if (o.before) allPhotos.push(o.before);
+    if (o.after) allPhotos.push(o.after);
+  });
+  const imgDims = {};
+  await Promise.all(allPhotos.map(async src => {
+    if (imgDims[src]) return;
+    try {
+      const img = await urlToImage(src);
+      imgDims[src] = {
+        w: img.naturalWidth || img.width,
+        h: img.naturalHeight || img.height
+      };
+    } catch (e) {
+      imgDims[src] = {
+        w: 4,
+        h: 3
+      };
+    }
+  }));
+  const doc = new jsPDF({
+    unit: 'mm',
+    format: 'a4'
+  });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const contentW = pageW - margin * 2;
+  let y = margin;
+  const ensure = need => {
+    if (y + need > pageH - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  };
+  const m = report.meta;
+  let logoH = 0;
+  if (logoImg) {
+    const targetH = 16;
+    const targetW = targetH * ((logoImg.naturalWidth || logoImg.width) / (logoImg.naturalHeight || logoImg.height));
+    try {
+      doc.addImage(logoImg, 'PNG', margin, y, targetW, targetH);
+      logoH = targetH;
+    } catch (e) {}
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text(COMPANY.name, pageW - margin, y + 3, {
+    align: 'right'
+  });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  let addrY = y + 7;
+  COMPANY.addressLines.forEach(l => {
+    doc.text(l, pageW - margin, addrY, {
+      align: 'right'
+    });
+    addrY += 3.6;
+  });
+  doc.text('Tel: ' + COMPANY.tel, pageW - margin, addrY, {
+    align: 'right'
+  });
+  y += Math.max(logoH, addrY - y) + 4;
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.6);
+  doc.line(margin, y, pageW - margin, y);
+  doc.setLineWidth(0.2);
+  y += 8;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text('SNAG LIST', margin, y);
+  y += 8;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+  doc.text(m.projectName || 'Untitled project', margin, y);
+  y += 8;
+  const rows = [['Project', m.projectName || '—', 'Date', m.date || '—'], ['Inspector', m.inspector || '—', 'Contractor', m.contractor || '—'], ['Client', m.client || '—']];
+  const labelW = 26,
+    valW = contentW / 2 - labelW;
+  const rowH = 7;
+  doc.setFontSize(9);
+  rows.forEach((r, ri) => {
+    const ry = y + ri * rowH;
+    let x = margin;
+    const cols = r.length === 4 ? [labelW, valW, labelW, valW] : [labelW, contentW - labelW];
+    r.forEach((cell, ci) => {
+      doc.setDrawColor(0);
+      doc.rect(x, ry, cols[ci], rowH);
+      doc.setFont('helvetica', ci % 2 === 0 ? 'bold' : 'normal');
+      const txt = doc.splitTextToSize(String(cell), cols[ci] - 3);
+      doc.text(txt[0] || '', x + 1.5, ry + rowH / 2 + 1.2);
+      x += cols[ci];
+    });
+  });
+  y += rows.length * rowH + 6;
+  {
+    const n = report.snags.length,
+      c = k => report.snags.filter(s => statusOf(s) === STATUSES[k]).length;
+    const pct = n ? Math.round(c('done') / n * 100) : 0;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(`Summary:  ${n} snag${n === 1 ? '' : 's'}  |  Open: ${c('open')}  |  In progress: ${c('progress')}  |  Completed: ${c('done')}  (${pct}% complete)`, margin, y + 2);
+    y += 9;
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  ensure(14);
+  doc.text('Location plan', margin, y);
+  y += 4;
+  const mapH = 55;
+  ensure(mapH + 4);
+  doc.setDrawColor(0);
+  doc.rect(margin, y, contentW, mapH);
+  const tf = mapTransform(report.snags);
+  if (!tf) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('No GPS-tagged snags recorded.', margin + 3, y + mapH / 2);
+  } else {
+    if (mapImg && mapImg.dataURL) {
+      try {
+        doc.addImage(mapImg.dataURL, 'PNG', margin, y, contentW, mapH);
+      } catch (e) {}
+      doc.setDrawColor(0);
+      doc.rect(margin, y, contentW, mapH);
+    }
+    const X = lo => margin + (lo - tf.minLo) / (tf.maxLo - tf.minLo) * contentW;
+    const Y = la => y + mapH - (la - tf.minLa) / (tf.maxLa - tf.minLa) * mapH;
+    tf.pts.forEach(p => {
+      const col = statusOf(p.o).color;
+      const rgb = [parseInt(col.slice(1, 3), 16), parseInt(col.slice(3, 5), 16), parseInt(col.slice(5, 7), 16)];
+      const cx = X(+p.o.lng),
+        cy = Y(+p.o.lat);
+      doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+      doc.setDrawColor(0);
+      doc.circle(cx, cy, 3, 'FD');
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text(String(p.n), cx, cy + 1, {
+        align: 'center'
+      });
+    });
+  }
+  doc.setTextColor(0, 0, 0);
+  y += mapH + 10;
+  ensure(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text(`Snags (${report.snags.length})`, margin, y);
+  y += 6;
+  if (!report.snags.length) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    ensure(8);
+    doc.text('No snags recorded.', margin, y);
+    y += 8;
+  }
+  const hexRgb = col => [parseInt(col.slice(1, 3), 16), parseInt(col.slice(3, 5), 16), parseInt(col.slice(5, 7), 16)];
+  for (let i = 0; i < report.snags.length; i++) {
+    const o = report.snags[i];
+    const st = statusOf(o);
+    const pr = PRIORITIES[o.priority];
+    doc.setFontSize(9);
+    const descLines = doc.splitTextToSize(o.description || '—', contentW - 6);
+    const actionLines = o.action ? doc.splitTextToSize('Action required: ' + o.action, contentW - 6) : [];
+    const noteLines = o.status === 'done' && o.completionNote ? doc.splitTextToSize('Completion note: ' + o.completionNote, contentW - 6) : [];
+    const metaBits = [];
+    if (o.trade) metaBits.push('Responsible: ' + o.trade);
+    if (o.dueDate) metaBits.push('Due: ' + fmtDate(o.dueDate));
+    if (o.status === 'done' && o.completedAt) metaBits.push('Completed: ' + fmtDT(o.completedAt));
+    const metaLine = metaBits.join('   |   ');
+    const coordLine = o.lat ? 1 : 0;
+    const gap = 4;
+    const pw = (contentW - 6 - gap) / 2;
+    const maxPh = 52;
+    const fit = src => {
+      if (!src) return {
+        w: pw,
+        h: 30
+      };
+      const dim = imgDims[src] || {
+        w: 4,
+        h: 3
+      };
+      let w = pw,
+        h = w * (dim.h / dim.w);
+      if (h > maxPh) {
+        h = maxPh;
+        w = h * (dim.w / dim.h);
+      }
+      return {
+        w,
+        h
+      };
+    };
+    const fb = fit(o.before),
+      fa = fit(o.after);
+    const photoH = Math.max(fb.h, fa.h);
+    const textLines = coordLine + (metaLine ? 1 : 0) + descLines.length + actionLines.length + noteLines.length + 1;
+    const headH = 7;
+    const blockH = headH + 4 + textLines * 4.6 + 5 + photoH + 4;
+    ensure(blockH + 4);
+    const blockTop = y;
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, blockTop, contentW, blockH);
+    doc.line(margin, blockTop + headH, margin + contentW, blockTop + headH);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`#${i + 1}`, margin + 2, blockTop + 5);
+    doc.setFontSize(8);
+    const rgb = hexRgb(st.color);
+    doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    const chipW = doc.getTextWidth(st.label) + 5;
+    doc.rect(margin + 12, blockTop + 1.6, chipW, 4.2, 'F');
+    doc.setTextColor(0, 0, 0);
+    doc.text(st.label, margin + 14.5, blockTop + 4.6);
+    doc.setFont('helvetica', 'normal');
+    if (pr) doc.text('Priority: ' + pr.label, margin + contentW - 2, blockTop + 4.6, {
+      align: 'right'
+    });
+    const locAvail = contentW - 12 - chipW - 6 - (pr ? 28 : 0);
+    doc.text(doc.splitTextToSize(String(o.location || ''), Math.max(20, locAvail))[0] || '', margin + 12 + chipW + 3, blockTop + 4.6);
+    let by = blockTop + headH + 5;
+    doc.setFontSize(8.5);
+    if (o.lat) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Coords:', margin + 3, by);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${(+o.lat).toFixed(5)}, ${(+o.lng).toFixed(5)}`, margin + 17, by);
+      by += 4.6;
+    }
+    if (metaLine) {
+      doc.text(metaLine, margin + 3, by);
+      by += 4.6;
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.text('Description:', margin + 3, by);
+    by += 4.6;
+    doc.setFont('helvetica', 'normal');
+    doc.text(descLines, margin + 3, by - 0.4);
+    by += descLines.length * 4.6;
+    if (actionLines.length) {
+      doc.text(actionLines, margin + 3, by - 0.4);
+      by += actionLines.length * 4.6;
+    }
+    if (noteLines.length) {
+      doc.text(noteLines, margin + 3, by - 0.4);
+      by += noteLines.length * 4.6;
+    }
+    by += 1;
+    [['BEFORE', o.before, fb], ['AFTER', o.after, fa]].forEach((c, ci) => {
+      const px = margin + 3 + ci * (pw + gap);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text(c[0], px, by);
+      const py = by + 1.5;
+      if (c[1]) {
+        try {
+          doc.addImage(c[1], 'JPEG', px, py, c[2].w, c[2].h, undefined, 'FAST');
+        } catch (e) {}
+        doc.setDrawColor(0);
+        doc.rect(px, py, c[2].w, c[2].h);
+      } else {
+        doc.setDrawColor(150, 150, 150);
+        doc.setLineDashPattern([1.5, 1.5], 0);
+        doc.rect(px, py, pw, 30);
+        doc.setLineDashPattern([], 0);
+        doc.setDrawColor(0);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(110, 110, 110);
+        doc.text(o.status === 'done' ? 'No after photo' : 'No after photo yet', px + pw / 2, py + 16, {
+          align: 'center'
+        });
+        doc.setTextColor(0, 0, 0);
+      }
+    });
+    y = blockTop + blockH + 4;
+  }
+  if ((report.documents || []).length) {
+    ensure(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(`Attached documents (${report.documents.length})`, margin, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    report.documents.forEach(d => {
+      ensure(5);
+      doc.text(`• ${d.name} (${fmtBytes(d.size)})`, margin + 2, y);
+      y += 4.6;
+    });
+    y += 3;
+  }
+  ensure(34);
+  y += 6;
+  const sigW = contentW / 3 - 6;
+  const sigY = y + 18;
+  [['Inspector', m.inspector || ''], ['Contractor representative', ''], ['Client representative', '']].forEach((s, i) => {
+    const sx = margin + i * (sigW + 9);
+    doc.setDrawColor(0);
+    doc.line(sx, sigY, sx + sigW, sigY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(s[0] + (s[1] ? ': ' + s[1] : ''), sx, sigY + 4);
+  });
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(110, 110, 110);
+    doc.setFontSize(6.5);
+    doc.text(`${COMPANY.name} — Reg No: ${COMPANY.regNo}`, pageW / 2, pageH - 13, {
+      align: 'center'
+    });
+    doc.text(`Members: ${COMPANY.members}`, pageW / 2, pageH - 10, {
+      align: 'center'
+    });
+    doc.setFontSize(7.5);
+    doc.text(`Generated ${fmtDT(Date.now())}`, margin, pageH - 6);
+    doc.text(`Page ${p} of ${pageCount}`, pageW - margin, pageH - 6, {
+      align: 'right'
+    });
+    doc.setTextColor(0, 0, 0);
+  }
+  return doc;
+}
+function useToast() {
+  const [toast, setToast] = useState(null);
+  const show = useCallback((msg, type = 'info') => {
+    setToast({
+      msg,
+      type,
+      id: uid()
+    });
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4200);
+    return () => clearTimeout(t);
+  }, [toast]);
+  const node = toast ? React.createElement("div", {
+    className: "no-print",
+    style: {
+      position: 'fixed',
+      left: '50%',
+      bottom: 20,
+      transform: 'translateX(-50%)',
+      zIndex: 80
+    }
+  }, React.createElement("div", {
+    className: "btn",
+    style: {
+      background: toast.type === 'error' ? '#3a1c1c' : toast.type === 'ok' ? '#173a26' : '#232a33',
+      borderColor: toast.type === 'error' ? '#5c2b2b' : toast.type === 'ok' ? '#2b5c3f' : '#39424e',
+      maxWidth: '90vw'
+    }
+  }, toast.msg)) : null;
+  return [node, show];
+}
+function AnnotationModal({
+  img,
+  onCancel,
+  onSave,
+  notify
+}) {
+  const canvasRef = useRef(null);
+  const [tool, setTool] = useState('circle');
+  const [strokes, setStrokes] = useState([]);
+  const drawing = useRef(null);
+  const dims = useMemo(() => scaledDims(img.naturalWidth || img.width, img.naturalHeight || img.height), [img]);
+  const lw = Math.max(3, Math.round(dims.w * 0.006));
+  const drawStroke = (ctx, s) => {
+    ctx.strokeStyle = '#ff2d2d';
+    ctx.lineWidth = lw;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    if (s.type === 'pen') {
+      ctx.beginPath();
+      s.points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+      ctx.stroke();
+    } else if (s.type === 'circle') {
+      const cx = (s.x0 + s.x1) / 2,
+        cy = (s.y0 + s.y1) / 2,
+        rx = Math.abs(s.x1 - s.x0) / 2,
+        ry = Math.abs(s.y1 - s.y0) / 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx || 1, ry || 1, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (s.type === 'arrow') {
+      ctx.beginPath();
+      ctx.moveTo(s.x0, s.y0);
+      ctx.lineTo(s.x1, s.y1);
+      ctx.stroke();
+      const a = Math.atan2(s.y1 - s.y0, s.x1 - s.x0),
+        h = lw * 4;
+      ctx.beginPath();
+      ctx.moveTo(s.x1, s.y1);
+      ctx.lineTo(s.x1 - h * Math.cos(a - Math.PI / 6), s.y1 - h * Math.sin(a - Math.PI / 6));
+      ctx.moveTo(s.x1, s.y1);
+      ctx.lineTo(s.x1 - h * Math.cos(a + Math.PI / 6), s.y1 - h * Math.sin(a + Math.PI / 6));
+      ctx.stroke();
+    } else if (s.type === 'dot') {
+      const r = lw * 2.4;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#ff2d2d';
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, lw * 0.35);
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+    }
+  };
+  const redraw = useCallback(extra => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    strokes.forEach(s => drawStroke(ctx, s));
+    if (extra) drawStroke(ctx, extra);
+  }, [strokes, img, lw]);
+  useEffect(() => {
+    const c = canvasRef.current;
+    c.width = dims.w;
+    c.height = dims.h;
+    redraw();
+  }, [dims]);
+  useEffect(() => {
+    redraw();
+  }, [strokes]);
+  const pos = e => {
+    const c = canvasRef.current,
+      r = c.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) * (c.width / r.width),
+      y: (e.clientY - r.top) * (c.height / r.height)
+    };
+  };
+  const down = e => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const p = pos(e);
+    drawing.current = tool === 'pen' ? {
+      type: 'pen',
+      points: [p]
+    } : tool === 'dot' ? {
+      type: 'dot',
+      x: p.x,
+      y: p.y
+    } : {
+      type: tool,
+      x0: p.x,
+      y0: p.y,
+      x1: p.x,
+      y1: p.y
+    };
+  };
+  const move = e => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const p = pos(e);
+    if (drawing.current.type === 'pen') drawing.current.points.push(p);else if (drawing.current.type === 'dot') {
+      drawing.current.x = p.x;
+      drawing.current.y = p.y;
+    } else {
+      drawing.current.x1 = p.x;
+      drawing.current.y1 = p.y;
+    }
+    redraw(drawing.current);
+  };
+  const up = e => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const finished = drawing.current;
+    drawing.current = null;
+    setStrokes(s => [...s, finished]);
+  };
+  const save = () => {
+    try {
+      const data = canvasRef.current.toDataURL('image/jpeg', JPEG_Q);
+      onSave(data, strokes.length > 0);
+    } catch (err) {
+      notify('Could not process image: ' + err.message, 'error');
+    }
+  };
+  return React.createElement("div", {
+    className: "no-print",
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,.8)',
+      zIndex: 70,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 12
+    }
+  }, React.createElement("div", {
+    style: {
+      background: 'var(--panel)',
+      border: '1px solid var(--line)',
+      borderRadius: 12,
+      padding: 14,
+      maxWidth: 'min(760px,96vw)',
+      maxHeight: '94vh',
+      overflow: 'auto'
+    }
+  }, React.createElement("div", {
+    className: "font-head",
+    style: {
+      fontSize: 20,
+      marginBottom: 8
+    }
+  }, "Mark up the defect"), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      opacity: .65,
+      marginBottom: 10
+    }
+  }, "Draw straight onto the photo to point out the exact defect — skip this if the photo speaks for itself."), React.createElement("div", {
+    className: "no-print",
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginBottom: 10
+    }
+  }, [['circle', 'Circle'], ['arrow', 'Arrow'], ['dot', 'Dot'], ['pen', 'Freehand']].map(([t, l]) => React.createElement("button", {
+    key: t,
+    className: "btn",
+    style: tool === t ? {
+      borderColor: 'var(--vis)',
+      color: 'var(--vis)'
+    } : null,
+    onClick: () => setTool(t)
+  }, l)), React.createElement("button", {
+    className: "btn",
+    onClick: () => setStrokes(s => s.slice(0, -1)),
+    disabled: !strokes.length
+  }, "Undo"), React.createElement("button", {
+    className: "btn",
+    onClick: () => setStrokes([]),
+    disabled: !strokes.length
+  }, "Clear")), React.createElement("canvas", {
+    ref: canvasRef,
+    className: "anno-canvas",
+    onPointerDown: down,
+    onPointerMove: move,
+    onPointerUp: up,
+    onPointerCancel: up
+  }), React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      justifyContent: 'flex-end',
+      marginTop: 12
+    }
+  }, React.createElement("button", {
+    className: "btn",
+    onClick: onCancel
+  }, "Cancel"), React.createElement("button", {
+    className: "btn btn-vis",
+    onClick: save
+  }, strokes.length ? 'Save markup' : 'Save (no markup)'))));
+}
+function MiniMap({
+  observations,
+  print,
+  staticMap
+}) {
+  const tf = mapTransform(observations);
+  if (!tf) return React.createElement("div", {
+    style: {
+      fontSize: 13,
+      opacity: .7,
+      padding: '8px 0'
+    }
+  }, "No GPS-tagged snags yet. Use the GPS button on a snag to place pins.");
+  const {
+    pts,
+    minLa,
+    maxLa,
+    minLo,
+    maxLo
+  } = tf;
+  const W = 600,
+    H = 300;
+  const X = lo => (lo - minLo) / (maxLo - minLo) * W;
+  const Y = la => H - (la - minLa) / (maxLa - minLa) * H;
+  const hasImg = !!(staticMap && staticMap.dataURL);
+  return React.createElement("div", {
+    className: print ? 'pr-map' : ''
+  }, React.createElement("svg", {
+    viewBox: `0 0 ${W} ${H}`,
+    style: {
+      width: '100%',
+      height: 'auto',
+      background: hasImg ? '#000' : print ? '#fff' : '#0d1116',
+      border: '1px solid ' + (print ? '#000' : 'var(--line)'),
+      borderRadius: print ? 0 : 8
+    }
+  }, hasImg && React.createElement("image", {
+    href: staticMap.dataURL,
+    x: "0",
+    y: "0",
+    width: W,
+    height: H,
+    preserveAspectRatio: "none"
+  }), !hasImg && [0.25, 0.5, 0.75].map(f => React.createElement("g", {
+    key: f,
+    stroke: print ? '#000' : '#2a323c',
+    strokeWidth: "0.5",
+    opacity: print ? 0.35 : 1
+  }, React.createElement("line", {
+    x1: W * f,
+    y1: "0",
+    x2: W * f,
+    y2: H
+  }), React.createElement("line", {
+    x1: "0",
+    y1: H * f,
+    x2: W,
+    y2: H * f
+  }))), pts.map(p => {
+    const c = statusOf(p.o).color;
+    return React.createElement("g", {
+      key: p.n,
+      transform: `translate(${X(+p.o.lng)},${Y(+p.o.lat)})`
+    }, React.createElement("circle", {
+      r: "12",
+      fill: hasImg ? c : print ? '#fff' : c,
+      stroke: '#000',
+      strokeWidth: print ? 1.2 : 1
+    }), React.createElement("text", {
+      textAnchor: "middle",
+      dy: "4",
+      fontSize: "12",
+      fontWeight: "700",
+      fill: hasImg ? '#0a0a0a' : print ? '#000' : '#0a0a0a'
+    }, p.n));
+  }), !hasImg && React.createElement("text", {
+    x: "6",
+    y: H - 8,
+    fontSize: "10",
+    fill: print ? '#000' : '#8a94a0'
+  }, "N up. Schematic relative positions (not to scale)."), hasImg && React.createElement("text", {
+    x: "6",
+    y: H - 8,
+    fontSize: "9",
+    fill: "#fff",
+    style: {
+      paintOrder: 'stroke',
+      stroke: '#000',
+      strokeWidth: 2
+    }
+  }, "Esri World Imagery")));
+}
+function AerialMap({
+  observations
+}) {
+  const mapDivRef = useRef(null);
+  const leafletRef = useRef(null);
+  const groupRef = useRef(null);
+  const [mapErr, setMapErr] = useState(null);
+  const pts = observations.map((o, i) => ({
+    o,
+    n: i + 1
+  })).filter(p => p.o.lat != null && p.o.lng != null && p.o.lat !== '' && p.o.lng !== '');
+  useEffect(() => {
+    if (!mapDivRef.current) return;
+    if (typeof L === 'undefined') {
+      setMapErr('Map library failed to load. Check your connection and reload.');
+      return;
+    }
+    try {
+      if (!leafletRef.current) {
+        const map = L.map(mapDivRef.current, {
+          zoomControl: true,
+          attributionControl: true
+        }).setView([0, 0], 2);
+        L.tileLayer(ESRI_IMAGERY_URL, {
+          maxZoom: 20,
+          maxNativeZoom: 19,
+          attribution: ESRI_ATTRIBUTION
+        }).addTo(map);
+        L.tileLayer(ESRI_LABELS_URL, {
+          maxZoom: 20,
+          maxNativeZoom: 19,
+          opacity: 0.85
+        }).addTo(map);
+        groupRef.current = L.layerGroup().addTo(map);
+        leafletRef.current = map;
+      }
+      const map = leafletRef.current,
+        group = groupRef.current;
+      group.clearLayers();
+      pts.forEach(p => {
+        const sev = statusOf(p.o);
+        const col = sev.color || '#888';
+        const icon = L.divIcon({
+          className: '',
+          html: '<div style="width:26px;height:26px;border-radius:50%;background:' + col + ';border:2px solid #000;display:flex;align-items:center;justify-content:center;font:700 12px Inter,sans-serif;color:#0a0a0a;box-shadow:0 1px 3px rgba(0,0,0,.6)">' + p.n + '</div>',
+          iconSize: [26, 26],
+          iconAnchor: [13, 13]
+        });
+        const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({
+          '<': '&lt;',
+          '>': '&gt;',
+          '&': '&amp;'
+        }[c]));
+        L.marker([+p.o.lat, +p.o.lng], {
+          icon
+        }).addTo(group).bindPopup('<b>#' + p.n + '</b> ' + esc(sev.label) + '<br>' + esc(p.o.location || ''));
+      });
+      if (pts.length === 1) {
+        map.setView([+pts[0].o.lat, +pts[0].o.lng], 19);
+      } else if (pts.length > 1) {
+        map.fitBounds(L.latLngBounds(pts.map(p => [+p.o.lat, +p.o.lng])), {
+          padding: [30, 30],
+          maxZoom: 19
+        });
+      }
+      setTimeout(() => map.invalidateSize(), 60);
+      setMapErr(null);
+    } catch (e) {
+      setMapErr('Could not load the map: ' + e.message);
+    }
+  });
+  useEffect(() => () => {
+    if (leafletRef.current) {
+      leafletRef.current.remove();
+      leafletRef.current = null;
+    }
+  }, []);
+  return React.createElement("div", null, !pts.length && React.createElement("div", {
+    style: {
+      fontSize: 13,
+      opacity: .7,
+      padding: '0 0 8px'
+    }
+  }, "No GPS-tagged snags yet. Use the GPS button on a snag to place pins."), mapErr && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#ffb4b4',
+      padding: '0 0 8px'
+    }
+  }, mapErr), React.createElement("div", {
+    ref: mapDivRef,
+    style: {
+      height: 320,
+      borderRadius: 8,
+      overflow: 'hidden',
+      border: '1px solid var(--line)',
+      background: '#0d1116'
+    }
+  }));
+}
+const h = React.createElement;
+const lblStyle = {
+  fontSize: 12,
+  opacity: .7
+};
+function PhotoPicker({
+  label,
+  required,
+  hint,
+  value,
+  marked,
+  onChange,
+  notify
+}) {
+  const [anno, setAnno] = useState(null);
+  const pick = async e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const img = await fileToImage(f);
+      onChange(imageToDataURL(img), false);
+    } catch (err) {
+      notify(err.message, 'error');
+    }
+  };
+  const openAnno = async () => {
+    try {
+      setAnno({
+        img: await urlToImage(value)
+      });
+    } catch (err) {
+      notify(err.message, 'error');
+    }
+  };
+  const fileBtn = (text, capture) => h("label", {
+    className: "btn btn-sm",
+    style: {
+      cursor: 'pointer'
+    }
+  }, text, h("input", Object.assign({
+    type: "file",
+    accept: "image/*",
+    onChange: pick,
+    style: {
+      display: 'none'
+    }
+  }, capture ? {
+    capture: "environment"
+  } : {})));
+  return h("div", {
+    style: {
+      flex: '1 1 230px',
+      minWidth: 200
+    }
+  }, h("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 4
+    }
+  }, h("label", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      letterSpacing: '.05em'
+    }
+  }, label), required && h("span", {
+    style: {
+      fontSize: 10,
+      color: '#fb923c'
+    }
+  }, "required"), marked && h("span", {
+    className: "anno-badge",
+    style: {
+      position: 'static'
+    }
+  }, "marked")), value ? h("div", null, h("img", {
+    src: value,
+    alt: label,
+    style: {
+      width: '100%',
+      height: 170,
+      objectFit: 'contain',
+      background: '#000',
+      borderRadius: 8,
+      border: '1px solid var(--line)',
+      display: 'block'
+    }
+  }), h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginTop: 6
+    }
+  }, h("button", {
+    className: "btn btn-sm",
+    onClick: openAnno
+  }, "✎ Mark up"), fileBtn("📷 Retake", true), fileBtn("Choose", false), h("button", {
+    className: "btn btn-sm btn-danger",
+    onClick: () => onChange(null, false)
+  }, "Remove"))) : h("div", {
+    style: {
+      border: '1px dashed var(--line)',
+      borderRadius: 8,
+      padding: 14,
+      textAlign: 'center'
+    }
+  }, h("div", {
+    style: {
+      fontSize: 11,
+      opacity: .55,
+      marginBottom: 8
+    }
+  }, hint || ''), h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      justifyContent: 'center',
+      flexWrap: 'wrap'
+    }
+  }, fileBtn("📷 Take photo", true), fileBtn("+ Choose photo", false))), anno && h(AnnotationModal, {
+    img: anno.img,
+    notify,
+    onCancel: () => setAnno(null),
+    onSave: (data, has) => {
+      onChange(data, marked || has);
+      setAnno(null);
+    }
+  }));
+}
+function CompleteModal({
+  snag,
+  onCancel,
+  onSave,
+  notify
+}) {
+  const [after, setAfter] = useState(snag.after || null);
+  const [marked, setMarked] = useState(!!snag.afterMarked);
+  const [note, setNote] = useState(snag.completionNote || '');
+  return h("div", {
+    className: "no-print",
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,.8)',
+      zIndex: 60,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 12
+    }
+  }, h("div", {
+    style: {
+      background: 'var(--panel)',
+      border: '1px solid var(--line)',
+      borderRadius: 12,
+      padding: 14,
+      width: 'min(520px,96vw)',
+      maxHeight: '94vh',
+      overflow: 'auto'
+    }
+  }, h("div", {
+    className: "font-head",
+    style: {
+      fontSize: 20,
+      marginBottom: 4
+    }
+  }, "Complete snag"), h("div", {
+    style: {
+      fontSize: 12,
+      opacity: .65,
+      marginBottom: 10
+    }
+  }, snag.location ? snag.location + ' — ' : '', snag.description), h(PhotoPicker, {
+    label: "AFTER PHOTO",
+    required: true,
+    hint: "Photograph the completed work so it can be compared with the before photo.",
+    value: after,
+    marked,
+    onChange: (v, m) => {
+      setAfter(v);
+      setMarked(m);
+    },
+    notify
+  }), h("label", {
+    style: Object.assign({
+      display: 'block',
+      marginTop: 12
+    }, lblStyle)
+  }, "Completion note (optional)"), h("textarea", {
+    className: "field",
+    rows: "2",
+    value: note,
+    onChange: e => setNote(e.target.value),
+    placeholder: "e.g. Recast and cured, inspected OK",
+    style: {
+      marginTop: 4
+    }
+  }), h("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      justifyContent: 'flex-end',
+      marginTop: 14
+    }
+  }, h("button", {
+    className: "btn",
+    onClick: onCancel
+  }, "Cancel"), h("button", {
+    className: "btn btn-vis",
+    disabled: !after,
+    onClick: () => onSave(after, marked, note.trim())
+  }, "Mark as completed"))));
+}
+function SnagCard({
+  snag,
+  n,
+  onEdit,
+  onDelete,
+  onComplete,
+  onReopen
+}) {
+  const st = statusOf(snag),
+    pr = PRIORITIES[snag.priority],
+    over = isOverdue(snag);
+  const chip = (text, c, bg) => h("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 700,
+      color: c,
+      background: bg,
+      padding: '2px 8px',
+      borderRadius: 999
+    }
+  }, text);
+  const photo = (label, src, emptyText) => h("div", {
+    style: {
+      flex: '1 1 0',
+      minWidth: 0
+    }
+  }, h("div", {
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: '.06em',
+      opacity: .7,
+      marginBottom: 3
+    }
+  }, label), src ? h("img", {
+    src,
+    alt: label,
+    style: {
+      width: '100%',
+      height: 150,
+      objectFit: 'contain',
+      background: '#000',
+      borderRadius: 6,
+      border: '1px solid var(--line)',
+      display: 'block'
+    }
+  }) : h("div", {
+    style: {
+      height: 150,
+      border: '1px dashed var(--line)',
+      borderRadius: 6,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 12,
+      opacity: .55
+    }
+  }, emptyText));
+  return h("div", {
+    style: {
+      background: 'var(--panel)',
+      border: '1px solid var(--line)',
+      borderLeft: '4px solid ' + st.color,
+      borderRadius: 8,
+      padding: 12
+    }
+  }, h("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: 8,
+      alignItems: 'flex-start',
+      flexWrap: 'wrap'
+    }
+  }, h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }
+  }, h("span", {
+    className: "font-head",
+    style: {
+      fontSize: 18
+    }
+  }, "#", n), chip(st.label, st.color, st.bg), pr && chip(pr.label + ' priority', pr.color, pr.bg), over && chip('Overdue', '#fff', '#b91c1c')), h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap'
+    }
+  }, snag.status === 'done' ? h("button", {
+    className: "btn btn-sm",
+    onClick: onReopen
+  }, "Reopen") : h("button", {
+    className: "btn btn-sm btn-vis",
+    onClick: onComplete
+  }, "✓ Complete"), h("button", {
+    className: "btn btn-sm",
+    onClick: onEdit
+  }, "Edit"), h("button", {
+    className: "btn btn-sm btn-danger",
+    onClick: onDelete
+  }, "Delete"))), h("div", {
+    style: {
+      fontSize: 13,
+      marginTop: 8,
+      lineHeight: 1.5
+    }
+  }, h("div", null, h("span", {
+    style: {
+      opacity: .6
+    }
+  }, "Location: "), snag.location || '—', snag.lat ? '  (' + (+snag.lat).toFixed(5) + ', ' + (+snag.lng).toFixed(5) + ')' : ''), h("div", {
+    style: {
+      marginTop: 4,
+      whiteSpace: 'pre-wrap'
+    }
+  }, snag.description || '—'), snag.action && h("div", {
+    style: {
+      marginTop: 4
+    }
+  }, h("span", {
+    style: {
+      opacity: .6
+    }
+  }, "Action: "), snag.action), (snag.trade || snag.dueDate) && h("div", {
+    style: {
+      marginTop: 4,
+      fontSize: 12,
+      opacity: .85
+    }
+  }, snag.trade ? 'Responsible: ' + snag.trade : '', snag.trade && snag.dueDate ? '  ·  ' : '', snag.dueDate ? 'Due: ' + fmtDate(snag.dueDate) : ''), snag.status === 'done' && h("div", {
+    style: {
+      marginTop: 4,
+      fontSize: 12,
+      color: STATUSES.done.color
+    }
+  }, "Completed ", snag.completedAt ? fmtDT(snag.completedAt) : '', snag.completionNote ? ' — ' + snag.completionNote : '')), h("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 10
+    }
+  }, photo('BEFORE', snag.before, 'No before photo'), photo('AFTER', snag.after, snag.status === 'done' ? 'No after photo' : 'Not completed yet')));
+}
+function SnagForm({
+  onSubmit,
+  editing,
+  onCancelEdit,
+  notify
+}) {
+  const empty = {
+    location: '',
+    lat: '',
+    lng: '',
+    priority: 'medium',
+    description: '',
+    action: '',
+    trade: '',
+    dueDate: '',
+    status: 'open',
+    before: null,
+    after: null,
+    beforeMarked: false,
+    afterMarked: false,
+    completionNote: '',
+    completedAt: null
+  };
+  const [d, setD] = useState(empty);
+  const [busyGPS, setBusyGPS] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recRef = useRef(null);
+  useEffect(() => {
+    setD(editing ? Object.assign({}, empty, editing) : empty);
+  }, [editing]);
+  const set = (k, v) => setD(x => Object.assign({}, x, {
+    [k]: v
+  }));
+  const getGPS = () => {
+    if (!('geolocation' in navigator)) return notify('Geolocation is not available in this browser.', 'error');
+    setBusyGPS(true);
+    navigator.geolocation.getCurrentPosition(p => {
+      setBusyGPS(false);
+      const la = p.coords.latitude,
+        lo = p.coords.longitude;
+      setD(x => Object.assign({}, x, {
+        lat: la,
+        lng: lo,
+        location: (x.location ? x.location + ' ' : '') + '(' + la.toFixed(5) + ', ' + lo.toFixed(5) + ')'
+      }));
+      notify('GPS fix acquired (±' + Math.round(p.coords.accuracy) + ' m).', 'ok');
+    }, err => {
+      setBusyGPS(false);
+      const m = {
+        1: 'Permission denied. Allow location access and retry.',
+        2: 'Position unavailable (no signal / hardware off).',
+        3: 'Timed out getting a fix.'
+      }[err.code] || err.message;
+      notify('GPS failed: ' + m, 'error');
+    }, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  };
+  const toggleMic = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return notify('Voice dictation is not supported in this browser (try Chrome).', 'error');
+    if (listening) {
+      try {
+        recRef.current && recRef.current.stop();
+      } catch (e) {}
+      return;
+    }
+    let rec;
+    try {
+      rec = new SR();
+    } catch (e) {
+      return notify('Could not start dictation: ' + e.message, 'error');
+    }
+    rec.lang = 'en-GB';
+    rec.interimResults = false;
+    rec.continuous = true;
+    rec.onresult = e => {
+      let t = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) t += e.results[i][0].transcript;
+      }
+      if (t) setD(x => Object.assign({}, x, {
+        description: (x.description ? x.description + ' ' : '') + t.trim()
+      }));
+    };
+    rec.onerror = e => {
+      setListening(false);
+      const m = {
+        'not-allowed': 'Microphone permission denied.',
+        'service-not-allowed': 'Microphone permission denied.',
+        'no-speech': 'No speech detected.',
+        'audio-capture': 'No microphone found.'
+      }[e.error] || e.error;
+      notify('Dictation error: ' + m, 'error');
+    };
+    rec.onend = () => setListening(false);
+    recRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch (e) {
+      notify('Could not start dictation: ' + e.message, 'error');
+    }
+  };
+  const submit = () => {
+    if (!d.description.trim()) return notify('Describe the snag before saving.', 'error');
+    if (!d.before) return notify('A "before" photo is required for every snag.', 'error');
+    if (d.status === 'done' && !d.after) return notify('Add an "after" photo before marking this snag as completed.', 'error');
+    const completedAt = d.status === 'done' ? d.completedAt || Date.now() : null;
+    onSubmit(Object.assign({}, d, {
+      id: editing ? editing.id : uid(),
+      createdAt: editing ? editing.createdAt : Date.now(),
+      completedAt
+    }));
+    setD(empty);
+  };
+  const field = (label, child) => h("div", null, h("label", {
+    style: lblStyle
+  }, label), child);
+  return h("div", {
+    className: "no-print",
+    style: {
+      background: 'var(--panel)',
+      border: '1px solid var(--line)',
+      borderRadius: 10,
+      padding: 14
+    }
+  }, h("div", {
+    className: "font-head",
+    style: {
+      fontSize: 20,
+      marginBottom: 10
+    }
+  }, editing ? 'Edit snag' : 'New snag'), h("label", {
+    style: lblStyle
+  }, "Location / chainage"), h("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 4
+    }
+  }, h("input", {
+    className: "field",
+    value: d.location,
+    onChange: e => set('location', e.target.value),
+    placeholder: "e.g. Unit 4 bathroom, Ch 0+120"
+  }), h("button", {
+    className: "btn",
+    onClick: getGPS,
+    disabled: busyGPS,
+    title: "Fetch GPS"
+  }, busyGPS ? '…' : 'GPS')), h("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 10,
+      marginTop: 10
+    }
+  }, field('Priority', h("select", {
+    className: "field",
+    value: d.priority,
+    onChange: e => set('priority', e.target.value),
+    style: {
+      marginTop: 4
+    }
+  }, PRIORITY_ORDER.map(k => h("option", {
+    key: k,
+    value: k
+  }, PRIORITIES[k].label)))), field('Coordinates', h("input", {
+    className: "field",
+    value: d.lat ? (+d.lat).toFixed(5) + ', ' + (+d.lng).toFixed(5) : '',
+    readOnly: true,
+    placeholder: "none",
+    style: {
+      marginTop: 4
+    }
+  }))), h("div", {
+    style: {
+      marginTop: 10
+    }
+  }, h("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }
+  }, h("label", {
+    style: lblStyle
+  }, "Description of snag"), h("button", {
+    onClick: toggleMic,
+    className: 'btn' + (listening ? ' listening' : ''),
+    style: listening ? {
+      background: '#3a1c1c',
+      borderColor: '#ef4444',
+      color: '#ffb4b4'
+    } : null
+  }, listening ? 'Stop' : 'Dictate')), h("textarea", {
+    className: "field",
+    rows: "3",
+    value: d.description,
+    onChange: e => set('description', e.target.value),
+    placeholder: "What is wrong / incomplete?",
+    style: {
+      marginTop: 4
+    }
+  })), h("div", {
+    style: {
+      marginTop: 10
+    }
+  }, field('Action required', h("input", {
+    className: "field",
+    value: d.action,
+    onChange: e => set('action', e.target.value),
+    placeholder: "e.g. Re-grout and clean",
+    style: {
+      marginTop: 4
+    }
+  }))), h("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))',
+      gap: 10,
+      marginTop: 10
+    }
+  }, field('Responsible party / trade', h("input", {
+    className: "field",
+    value: d.trade,
+    onChange: e => set('trade', e.target.value),
+    placeholder: "e.g. Tiler, ABC Builders",
+    style: {
+      marginTop: 4
+    }
+  })), field('Due date', h("input", {
+    type: "date",
+    className: "field",
+    value: d.dueDate,
+    onChange: e => set('dueDate', e.target.value),
+    style: {
+      marginTop: 4
+    }
+  }))), h("div", {
+    style: {
+      display: 'flex',
+      gap: 14,
+      flexWrap: 'wrap',
+      marginTop: 14
+    }
+  }, h(PhotoPicker, {
+    label: "BEFORE PHOTO",
+    required: true,
+    hint: "Photograph the snag before any remedial work.",
+    value: d.before,
+    marked: d.beforeMarked,
+    onChange: (v, m) => setD(x => Object.assign({}, x, {
+      before: v,
+      beforeMarked: m
+    })),
+    notify
+  }), h(PhotoPicker, {
+    label: "AFTER PHOTO",
+    required: d.status === 'done',
+    hint: "Add once the work is done (needed to mark the snag completed).",
+    value: d.after,
+    marked: d.afterMarked,
+    onChange: (v, m) => setD(x => Object.assign({}, x, {
+      after: v,
+      afterMarked: m
+    })),
+    notify
+  })), h("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: d.status === 'done' ? '1fr 2fr' : '1fr',
+      gap: 10,
+      marginTop: 14
+    }
+  }, field('Status', h("select", {
+    className: "field",
+    value: d.status,
+    onChange: e => set('status', e.target.value),
+    style: {
+      marginTop: 4
+    }
+  }, STATUS_ORDER.map(k => h("option", {
+    key: k,
+    value: k
+  }, STATUSES[k].label)))), d.status === 'done' && field('Completion note (optional)', h("input", {
+    className: "field",
+    value: d.completionNote,
+    onChange: e => set('completionNote', e.target.value),
+    placeholder: "e.g. Re-inspected, accepted",
+    style: {
+      marginTop: 4
+    }
+  }))), h("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 14
+    }
+  }, h("button", {
+    className: "btn btn-vis",
+    onClick: submit
+  }, editing ? 'Update snag' : 'Add snag'), editing && h("button", {
+    className: "btn",
+    onClick: onCancelEdit
+  }, "Cancel edit")));
+}
+function PrintReport({
+  report,
+  staticMap
+}) {
+  const m = report.meta;
+  return React.createElement("div", {
+    className: "pr-wrap print-only"
+  }, React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      borderBottom: '2px solid #000',
+      paddingBottom: 8,
+      marginBottom: 10
+    }
+  }, React.createElement("img", {
+    src: COMPANY.logo,
+    alt: COMPANY.name,
+    style: {
+      height: 52,
+      width: 'auto'
+    }
+  }), React.createElement("div", {
+    style: {
+      textAlign: 'right',
+      fontSize: 10,
+      lineHeight: 1.4
+    }
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 12
+    }
+  }, COMPANY.name), COMPANY.addressLines.map((l, i) => React.createElement("div", {
+    key: i
+  }, l)), React.createElement("div", null, "Tel: ", COMPANY.tel))), React.createElement("h1", {
+    className: "font-head",
+    style: {
+      fontSize: 28,
+      margin: '0 0 2px'
+    }
+  }, "SNAG LIST"), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      marginBottom: 10
+    }
+  }, m.projectName || 'Untitled project'), React.createElement("table", {
+    className: "pr-table",
+    style: {
+      marginBottom: 12
+    }
+  }, React.createElement("tbody", null, React.createElement("tr", null, React.createElement("th", null, "Project"), React.createElement("td", null, m.projectName || '—'), React.createElement("th", null, "Date"), React.createElement("td", null, m.date || '—')), React.createElement("tr", null, React.createElement("th", null, "Inspector"), React.createElement("td", null, m.inspector || '—'), React.createElement("th", null, "Contractor"), React.createElement("td", null, m.contractor || '—')), React.createElement("tr", null, React.createElement("th", null, "Client"), React.createElement("td", {
+    colSpan: 3
+  }, m.client || '—')))), React.createElement("h3", {
+    className: "font-head",
+    style: {
+      fontSize: 15,
+      margin: '0 0 6px'
+    }
+  }, "Location plan"), React.createElement(MiniMap, {
+    observations: report.snags,
+    print: true,
+    staticMap: staticMap
+  }), React.createElement("h3", {
+    className: "font-head",
+    style: {
+      fontSize: 15,
+      margin: '14px 0 6px'
+    }
+  }, "Snags (", report.snags.length, ")"), report.snags.length === 0 && React.createElement("div", {
+    style: {
+      fontSize: 12
+    }
+  }, "No snags recorded."), report.snags.map((o, i) => {
+    const s = statusOf(o);
+    const pr = PRIORITIES[o.priority];
+    const ph = (label, src, none) => React.createElement("div", {
+      style: {
+        flex: '1 1 0',
+        minWidth: 0
+      }
+    }, React.createElement("div", {
+      style: {
+        fontSize: 10,
+        fontWeight: 700
+      }
+    }, label), src ? React.createElement("img", {
+      src: src,
+      alt: "",
+      style: {
+        width: '100%',
+        border: '1px solid #000'
+      }
+    }) : React.createElement("div", {
+      style: {
+        border: '1px dashed #000',
+        height: 90,
+        fontSize: 10,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }
+    }, none));
+    return React.createElement("div", {
+      className: "pr-snag",
+      key: o.id
+    }, React.createElement("div", {
+      className: "pr-snag-head"
+    }, "#", i + 1, " \xA0 ", React.createElement("span", {
+      className: "sev-chip",
+      style: {
+        border: '1px solid',
+        padding: '1px 6px',
+        fontSize: 11
+      }
+    }, s.label.toUpperCase()), pr ? ' \xA0 Priority: ' + pr.label : '', " \xA0 ", o.location || ''), React.createElement("div", {
+      className: "pr-snag-body"
+    }, o.lat ? React.createElement("div", null, React.createElement("b", null, "Coords:"), " ", (+o.lat).toFixed(5), ", ", (+o.lng).toFixed(5)) : null, (o.trade || o.dueDate) && React.createElement("div", null, o.trade ? 'Responsible: ' + o.trade : '', o.trade && o.dueDate ? '  |  ' : '', o.dueDate ? 'Due: ' + fmtDate(o.dueDate) : ''), React.createElement("div", {
+      style: {
+        whiteSpace: 'pre-wrap',
+        margin: '2px 0'
+      }
+    }, React.createElement("b", null, "Description:"), " ", o.description || '—'), o.action && React.createElement("div", null, React.createElement("b", null, "Action required:"), " ", o.action), o.status === 'done' && React.createElement("div", null, React.createElement("b", null, "Completed:"), " ", o.completedAt ? fmtDT(o.completedAt) : '', o.completionNote ? ' — ' + o.completionNote : ''), React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 8,
+        marginTop: 6
+      }
+    }, ph('BEFORE', o.before, 'No before photo'), ph('AFTER', o.after, o.status === 'done' ? 'No after photo' : 'No after photo yet'))));
+  }), (report.documents || []).length > 0 && React.createElement("div", {
+    style: {
+      marginTop: 14
+    }
+  }, React.createElement("h3", {
+    className: "font-head",
+    style: {
+      fontSize: 15,
+      margin: '0 0 6px'
+    }
+  }, "Attached documents (", report.documents.length, ")"), React.createElement("ul", {
+    style: {
+      margin: 0,
+      paddingLeft: 18,
+      fontSize: 11
+    }
+  }, report.documents.map(d => React.createElement("li", {
+    key: d.id
+  }, d.name, " (", fmtBytes(d.size), ")")))), React.createElement("div", {
+    className: "pr-sig"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "line"
+  }, "Inspector: ", m.inspector || '')), React.createElement("div", null, React.createElement("div", {
+    className: "line"
+  }, "Contractor representative")), React.createElement("div", null, React.createElement("div", {
+    className: "line"
+  }, "Client representative"))), React.createElement("div", {
+    style: {
+      fontSize: 9,
+      marginTop: 16,
+      color: '#000'
+    }
+  }, "Generated ", fmtDT(Date.now()), ". Status shown as text for monochrome print."), React.createElement("div", {
+    style: {
+      fontSize: 8,
+      marginTop: 4,
+      color: '#000',
+      borderTop: '1px solid #000',
+      paddingTop: 4
+    }
+  }, COMPANY.name, " — Reg No: ", COMPANY.regNo, " — Members: ", COMPANY.members));
+}
+function App() {
+  const [toastNode, notify] = useToast();
+  const [reports, setReports] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [completing, setCompleting] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [ready, setReady] = useState(false);
+  const [dbOk, setDbOk] = useState(true);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [printMap, setPrintMap] = useState(null);
+  const [printBusy, setPrintBusy] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const all = await idbGetAll();
+        if (all.length) {
+          all.sort((a, b) => b.updatedAt - a.updatedAt);
+          setReports(all);
+          setActiveId(all[0].id);
+        } else {
+          const b = blankReport();
+          setReports([b]);
+          setActiveId(b.id);
+          await idbPut(b).catch(() => {});
+        }
+      } catch (e) {
+        setDbOk(false);
+        const b = blankReport();
+        setReports([b]);
+        setActiveId(b.id);
+        notify('IndexedDB unavailable, data will not persist this session: ' + e.message, 'error');
+      }
+      setReady(true);
+    })();
+  }, []);
+  const active = reports.find(r => r.id === activeId);
+  useEffect(() => {
+    if (!ready || !active || !dbOk) return;
+    const t = setTimeout(() => {
+      idbPut(active).catch(e => notify('Save failed: ' + e.message, 'error'));
+    }, 500);
+    return () => clearTimeout(t);
+  }, [active, ready, dbOk]);
+  const patchActive = fn => setReports(rs => rs.map(r => r.id === activeId ? {
+    ...fn(r),
+    updatedAt: Date.now()
+  } : r));
+  const setMeta = (k, v) => patchActive(r => ({
+    ...r,
+    meta: {
+      ...r.meta,
+      [k]: v
+    }
+  }));
+  const addObs = o => {
+    patchActive(r => ({
+      ...r,
+      snags: editing ? r.snags.map(x => x.id === o.id ? o : x) : [...r.snags, o]
+    }));
+    setEditing(null);
+    notify(editing ? 'Snag updated.' : 'Snag added.', 'ok');
+  };
+  const delObs = id => {
+    if (!confirm('Delete this snag (and its before/after photos)?')) return;
+    patchActive(r => ({
+      ...r,
+      snags: r.snags.filter(x => x.id !== id)
+    }));
+    if (editing && editing.id === id) setEditing(null);
+  };
+  const completeSnag = (id, after, marked, note) => {
+    patchActive(r => ({
+      ...r,
+      snags: r.snags.map(x => x.id === id ? {
+        ...x,
+        status: 'done',
+        after,
+        afterMarked: marked,
+        completionNote: note,
+        completedAt: Date.now()
+      } : x)
+    }));
+    setCompleting(null);
+    notify('Snag marked as completed.', 'ok');
+  };
+  const reopenSnag = id => patchActive(r => ({
+    ...r,
+    snags: r.snags.map(x => x.id === id ? {
+      ...x,
+      status: 'open',
+      completedAt: null
+    } : x)
+  }));
+  const addDocuments = async files => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    const room = MAX_DOCS - (active.documents || []).length;
+    if (room <= 0) return notify('Maximum ' + MAX_DOCS + ' documents per report.', 'error');
+    const toAdd = list.slice(0, room);
+    if (list.length > toAdd.length) notify('Only added ' + toAdd.length + ' of ' + list.length + ' files (max ' + MAX_DOCS + ' documents per report).', 'error');
+    for (const f of toAdd) {
+      if (f.size > MAX_DOC_MB * 1024 * 1024) {
+        notify(f.name + ' is over ' + MAX_DOC_MB + ' MB and was skipped.', 'error');
+        continue;
+      }
+      try {
+        const data = await fileToDataURL(f);
+        patchActive(r => ({
+          ...r,
+          documents: [...(r.documents || []), {
+            id: uid(),
+            name: f.name,
+            type: f.type || '',
+            size: f.size,
+            data,
+            addedAt: Date.now()
+          }]
+        }));
+      } catch (e) {
+        notify('Could not add ' + f.name + ': ' + e.message, 'error');
+      }
+    }
+  };
+  const removeDocument = id => patchActive(r => ({
+    ...r,
+    documents: (r.documents || []).filter(d => d.id !== id)
+  }));
+  const newReport = () => {
+    const b = blankReport();
+    setReports(rs => [b, ...rs]);
+    setActiveId(b.id);
+    setEditing(null);
+    if (dbOk) idbPut(b).catch(() => {});
+  };
+  const delReport = async () => {
+    if (!active) return;
+    if (!confirm('Delete the entire report "' + (active.meta.projectName || 'Untitled') + '" and all its snags?')) return;
+    const id = active.id;
+    if (dbOk) await idbDel(id).catch(() => {});
+    setReports(rs => {
+      const left = rs.filter(r => r.id !== id);
+      if (!left.length) {
+        const b = blankReport();
+        setActiveId(b.id);
+        if (dbOk) idbPut(b).catch(() => {});
+        return [b];
+      }
+      setActiveId(left[0].id);
+      return left;
+    });
+  };
+  const exportCSV = () => {
+    if (!active) return;
+    saveFile((active.meta.projectName || 'snag-list').replace(/[^\w-]+/g, '_') + '.csv', new Blob([toCSV(active)], {
+      type: 'text/csv;charset=utf-8'
+    }), notify);
+  };
+  const exportPDF = async () => {
+    if (!active || pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const doc = await buildPDF(active, notify);
+      if (doc) {
+        const blob = doc.output('blob');
+        await saveFile((active.meta.projectName || 'snag-list').replace(/[^\w-]+/g, '_') + '.pdf', blob, notify);
+      }
+    } catch (e) {
+      notify('PDF export failed: ' + e.message, 'error');
+    }
+    setPdfBusy(false);
+  };
+  const doPrint = async () => {
+    if (!active || printBusy) return;
+    setPrintBusy(true);
+    try {
+      const img = await fetchStaticMapImage(active.snags, 900, 450);
+      setPrintMap(img);
+    } catch (e) {
+      setPrintMap(null);
+    }
+    setPrintBusy(false);
+    setTimeout(() => window.print(), 60);
+  };
+  const backup = () => {
+    saveFile('snaglist-backup-' + todayISO() + '.json', new Blob([JSON.stringify(reports, null, 2)], {
+      type: 'application/json'
+    }), notify);
+  };
+  const restore = async e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const txt = await f.text();
+      const data = JSON.parse(txt);
+      const arr = Array.isArray(data) ? data : [data];
+      for (const r of arr) {
+        if (r && r.id && r.meta) {
+          if (dbOk) await idbPut(r).catch(() => {});
+        }
+      }
+      const all = dbOk ? await idbGetAll() : arr;
+      all.sort((a, b) => b.updatedAt - a.updatedAt);
+      setReports(all);
+      setActiveId(all[0].id);
+      notify('Restored ' + arr.length + ' report(s).', 'ok');
+    } catch (err) {
+      notify('Restore failed: ' + err.message, 'error');
+    }
+  };
+  if (!ready) return React.createElement("div", {
+    style: {
+      padding: 40,
+      textAlign: 'center',
+      opacity: .6
+    }
+  }, "Loading…");
+  const m = active.meta;
+  const counts = STATUS_ORDER.map(k => ({
+    k,
+    n: active.snags.filter(o => statusOf(o) === STATUSES[k]).length
+  }));
+  const totalSnags = active.snags.length;
+  const doneCount = counts.find(c => c.k === 'done').n;
+  const pctDone = totalSnags ? Math.round(doneCount / totalSnags * 100) : 0;
+  const shownSnags = active.snags.map((o, i) => ({
+    o,
+    n: i + 1
+  })).filter(x => filter === 'all' || statusOf(x.o) === STATUSES[filter]);
+  return React.createElement("div", null, React.createElement("div", {
+    className: "no-print",
+    style: {
+      maxWidth: 900,
+      margin: '0 auto',
+      padding: '14px 14px 60px'
+    }
+  }, React.createElement("header", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+      gap: 10,
+      flexWrap: 'wrap',
+      marginBottom: 14
+    }
+  }, React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10
+    }
+  }, React.createElement("img", {
+    src: COMPANY.logo,
+    alt: COMPANY.name,
+    style: {
+      height: 42,
+      width: 'auto',
+      borderRadius: 4,
+      flexShrink: 0
+    }
+  }), React.createElement("div", null, React.createElement("h1", {
+    className: "font-head",
+    style: {
+      fontSize: 30,
+      margin: 0,
+      lineHeight: 1
+    }
+  }, "SNAG", React.createElement("span", {
+    style: {
+      color: 'var(--vis)'
+    }
+  }, "LIST")), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      opacity: .6
+    }
+  }, "Snag list with before & after photos"))), React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap'
+    }
+  }, React.createElement("button", {
+    className: "btn",
+    onClick: newReport
+  }, "New report"), React.createElement("button", {
+    className: "btn",
+    onClick: exportCSV
+  }, "CSV"), React.createElement("button", {
+    className: "btn",
+    onClick: backup
+  }, "Backup"), React.createElement("label", {
+    className: "btn",
+    style: {
+      cursor: 'pointer'
+    }
+  }, "Restore", React.createElement("input", {
+    type: "file",
+    accept: "application/json",
+    onChange: restore,
+    style: {
+      display: 'none'
+    }
+  })), React.createElement("button", {
+    className: "btn",
+    onClick: doPrint,
+    disabled: printBusy,
+    title: "Open the browser print dialog"
+  }, printBusy ? 'Preparing…' : 'Print'), React.createElement("button", {
+    className: "btn btn-vis",
+    onClick: exportPDF,
+    disabled: pdfBusy
+  }, pdfBusy ? 'Building…' : 'Export PDF'))), reports.length > 1 && React.createElement("div", {
+    style: {
+      marginBottom: 12,
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center'
+    }
+  }, React.createElement("span", {
+    style: {
+      fontSize: 12,
+      opacity: .7
+    }
+  }, "Report"), React.createElement("select", {
+    className: "field",
+    style: {
+      maxWidth: 420
+    },
+    value: activeId,
+    onChange: e => {
+      setActiveId(e.target.value);
+      setEditing(null);
+    }
+  }, reports.map(r => React.createElement("option", {
+    key: r.id,
+    value: r.id
+  }, (r.meta.projectName || 'Untitled') + ' · ' + r.meta.date + ' · ' + r.snags.length + ' snags'))), React.createElement("button", {
+    className: "btn btn-danger",
+    onClick: delReport
+  }, "Delete report")), React.createElement("section", {
+    style: {
+      background: 'var(--panel)',
+      border: '1px solid var(--line)',
+      borderRadius: 10,
+      padding: 14,
+      marginBottom: 14
+    }
+  }, React.createElement("div", {
+    className: "font-head",
+    style: {
+      fontSize: 20,
+      marginBottom: 10
+    }
+  }, "Report details"), React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))',
+      gap: 10
+    }
+  }, [['projectName', 'Project name'], ['inspector', 'Inspector'], ['contractor', 'Contractor'], ['client', 'Client']].map(([k, l]) => React.createElement("div", {
+    key: k
+  }, React.createElement("label", {
+    style: {
+      fontSize: 12,
+      opacity: .7
+    }
+  }, l), React.createElement("input", {
+    className: "field",
+    style: {
+      marginTop: 4
+    },
+    value: m[k],
+    onChange: e => setMeta(k, e.target.value)
+  }))), React.createElement("div", null, React.createElement("label", {
+    style: {
+      fontSize: 12,
+      opacity: .7
+    }
+  }, "Date"), React.createElement("input", {
+    type: "date",
+    className: "field",
+    style: {
+      marginTop: 4
+    },
+    value: m.date,
+    onChange: e => setMeta('date', e.target.value)
+  })))), React.createElement("section", {
+    style: {
+      background: 'var(--panel)',
+      border: '1px solid var(--line)',
+      borderRadius: 10,
+      padding: 14,
+      marginBottom: 14
+    }
+  }, React.createElement("div", {
+    className: "font-head",
+    style: {
+      fontSize: 20,
+      marginBottom: 4
+    }
+  }, "Project documents"), React.createElement("div", {
+    style: {
+      fontSize: 11,
+      opacity: .55,
+      marginBottom: 8
+    }
+  }, "Drawings, specs, site instructions or any other reference file for this report."), (active.documents || []).length > 0 && React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+      marginBottom: 10
+    }
+  }, active.documents.map(d => React.createElement("div", {
+    key: d.id,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      padding: '6px 8px',
+      background: '#12161b',
+      border: '1px solid var(--line)',
+      borderRadius: 6
+    }
+  }, React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 13,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, d.name), React.createElement("span", {
+    style: {
+      fontSize: 11,
+      opacity: .6,
+      flexShrink: 0
+    }
+  }, fmtBytes(d.size)), React.createElement("a", {
+    href: d.data,
+    download: d.name,
+    className: "btn btn-sm",
+    style: {
+      textDecoration: 'none'
+    }
+  }, "Open"), React.createElement("button", {
+    className: "btn btn-sm btn-danger",
+    onClick: () => removeDocument(d.id)
+  }, "×")))), (active.documents || []).length < MAX_DOCS && React.createElement("label", {
+    className: "btn",
+    style: {
+      cursor: 'pointer'
+    }
+  }, "+ Document", React.createElement("input", {
+    type: "file",
+    multiple: true,
+    onChange: e => {
+      addDocuments(e.target.files);
+      e.target.value = '';
+    },
+    style: {
+      display: 'none'
+    }
+  }))), React.createElement("section", {
+    style: {
+      background: 'var(--panel)',
+      border: '1px solid var(--line)',
+      borderRadius: 10,
+      padding: 14,
+      marginBottom: 14
+    }
+  }, React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+      flexWrap: 'wrap',
+      gap: 8
+    }
+  }, React.createElement("div", {
+    className: "font-head",
+    style: {
+      fontSize: 20
+    }
+  }, "Site map"), React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap'
+    }
+  }, counts.map(c => React.createElement("span", {
+    key: c.k,
+    style: {
+      fontSize: 11,
+      fontWeight: 700,
+      color: STATUSES[c.k].color,
+      background: STATUSES[c.k].bg,
+      padding: '2px 8px',
+      borderRadius: 999
+    }
+  }, STATUSES[c.k].label, ": ", c.n)))), React.createElement(AerialMap, {
+    observations: active.snags
+  })), React.createElement(SnagForm, {
+    onSubmit: addObs,
+    editing: editing,
+    onCancelEdit: () => setEditing(null),
+    notify: notify
+  }), React.createElement("section", {
+    style: {
+      marginTop: 14
+    }
+  }, React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 6
+    }
+  }, React.createElement("div", {
+    className: "font-head",
+    style: {
+      fontSize: 20
+    }
+  }, "Snags (", totalSnags, ")"), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      opacity: .8
+    }
+  }, doneCount, " of ", totalSnags, " completed · ", pctDone, "%")), React.createElement("div", {
+    style: {
+      height: 8,
+      borderRadius: 999,
+      background: '#12161b',
+      border: '1px solid var(--line)',
+      overflow: 'hidden',
+      marginBottom: 10
+    }
+  }, React.createElement("div", {
+    style: {
+      width: pctDone + '%',
+      height: '100%',
+      background: STATUSES.done.color,
+      transition: 'width .3s'
+    }
+  })), React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginBottom: 10
+    }
+  }, [['all', 'All', totalSnags]].concat(counts.map(c => [c.k, STATUSES[c.k].label, c.n])).map(f => React.createElement("button", {
+    key: f[0],
+    className: "btn btn-sm",
+    style: filter === f[0] ? {
+      borderColor: 'var(--vis)',
+      color: 'var(--vis)'
+    } : null,
+    onClick: () => setFilter(f[0])
+  }, f[1], " (", f[2], ")"))), React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10
+    }
+  }, totalSnags === 0 && React.createElement("div", {
+    style: {
+      opacity: .6,
+      fontSize: 13
+    }
+  }, "Nothing logged yet. Add your first snag above — every snag needs a before photo."), totalSnags > 0 && shownSnags.length === 0 && React.createElement("div", {
+    style: {
+      opacity: .6,
+      fontSize: 13
+    }
+  }, "No snags with this status."), shownSnags.map(x => React.createElement(SnagCard, {
+    key: x.o.id,
+    snag: x.o,
+    n: x.n,
+    onEdit: () => {
+      setEditing(x.o);
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+    },
+    onDelete: () => delObs(x.o.id),
+    onComplete: () => setCompleting(x.o.id),
+    onReopen: () => reopenSnag(x.o.id)
+  }))))), React.createElement(PrintReport, {
+    report: active,
+    staticMap: printMap
+  }), completing && (() => {
+    const sn = active.snags.find(s => s.id === completing);
+    return sn ? React.createElement(CompleteModal, {
+      snag: sn,
+      notify: notify,
+      onCancel: () => setCompleting(null),
+      onSave: (after, marked, note) => completeSnag(sn.id, after, marked, note)
+    }) : null;
+  })(), toastNode);
+}
+window.addEventListener('error', e => {
+  const el = document.getElementById('root');
+  if (el && !el.hasChildNodes()) el.innerHTML = '<div style="padding:24px;color:#ffb4b4;font-family:sans-serif">App failed to start: ' + (e.message || '') + '. Try reloading the page; if it keeps happening, check your connection or try a different browser/network.</div>';
+});
+if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+  const el = document.getElementById('root');
+  if (el) el.innerHTML = '<div style="padding:24px;color:#ffb4b4;font-family:sans-serif">Could not load the app’s scripts (React did not load). Try reloading the page; if it keeps happening, check your connection or try a different browser/network.</div>';
+} else {
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(React.createElement(App, null));
+}
+</script>
+</body>
+</html>
