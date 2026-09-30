@@ -2615,7 +2615,7 @@ function SnagForm({
   });
   const [d, setD] = useState(fresh);
   const [busyGPS, setBusyGPS] = useState(false);
-  const [listening, setListening] = useState(false);
+  const [listenField, setListenField] = useState(null);
   const recRef = useRef(null);
   useEffect(() => {
     setD(editing ? Object.assign({}, empty, editing, {
@@ -2652,14 +2652,14 @@ function SnagForm({
       maximumAge: 0
     });
   };
-  const toggleMic = () => {
+  const toggleMic = field => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return notify('Voice dictation is not supported in this browser (try Chrome).', 'error');
-    if (listening) {
+    if (listenField) {
       try {
         recRef.current && recRef.current.stop();
       } catch (e) {}
-      return;
+      if (listenField === field) return;
     }
     let rec;
     try {
@@ -2676,11 +2676,11 @@ function SnagForm({
         if (e.results[i].isFinal) t += e.results[i][0].transcript;
       }
       if (t) setD(x => Object.assign({}, x, {
-        description: (x.description ? x.description + ' ' : '') + t.trim()
+        [field]: (x[field] ? x[field] + ' ' : '') + t.trim()
       }));
     };
     rec.onerror = e => {
-      setListening(false);
+      setListenField(null);
       const m = {
         'not-allowed': 'Microphone permission denied.',
         'service-not-allowed': 'Microphone permission denied.',
@@ -2689,15 +2689,24 @@ function SnagForm({
       }[e.error] || e.error;
       notify('Dictation error: ' + m, 'error');
     };
-    rec.onend = () => setListening(false);
+    rec.onend = () => setListenField(null);
     recRef.current = rec;
     try {
       rec.start();
-      setListening(true);
+      setListenField(field);
     } catch (e) {
       notify('Could not start dictation: ' + e.message, 'error');
     }
   };
+  const micBtn = field => h("button", {
+    onClick: () => toggleMic(field),
+    className: 'btn btn-sm' + (listenField === field ? ' listening' : ''),
+    style: listenField === field ? {
+      background: '#3a1c1c',
+      borderColor: '#ef4444',
+      color: '#ffb4b4'
+    } : null
+  }, listenField === field ? 'Stop' : '🎤 Dictate');
   const submit = () => {
     if (!d.description.trim()) return notify('Describe the snag before saving.', 'error');
     if (!d.before) return notify('A "before" photo is required for every snag.', 'error');
@@ -2789,15 +2798,7 @@ function SnagForm({
     }
   }, h("label", {
     style: lblStyle
-  }, "Description of snag"), h("button", {
-    onClick: toggleMic,
-    className: 'btn' + (listening ? ' listening' : ''),
-    style: listening ? {
-      background: '#3a1c1c',
-      borderColor: '#ef4444',
-      color: '#ffb4b4'
-    } : null
-  }, listening ? 'Stop' : 'Dictate')), h("textarea", {
+  }, "Description of snag"), micBtn('description')), h("textarea", {
     className: "field",
     rows: "3",
     value: d.description,
@@ -2810,7 +2811,15 @@ function SnagForm({
     style: {
       marginTop: 10
     }
-  }, field('Action required', h("input", {
+  }, h("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }
+  }, h("label", {
+    style: lblStyle
+  }, "Action required"), micBtn('action')), h("input", {
     className: "field",
     value: d.action,
     onChange: e => set('action', e.target.value),
@@ -2818,7 +2827,7 @@ function SnagForm({
     style: {
       marginTop: 4
     }
-  }))), h("div", {
+  })), h("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))',
